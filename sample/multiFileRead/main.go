@@ -15,13 +15,15 @@ var (
 	batchChan []chan *bytes.Buffer
 	inputDone []chan struct{}
 	wg sync.WaitGroup
+	itemsReadChan []chan int64
+	bytesReadChan []chan int64
 )
 
 var (
 	workers int
 )
 
-func scanFromFile(itemsPerBatch int, classname string, myFileId int) (int64, int64) {
+func scanFromFile(itemsPerBatch int, classname string, myFileId int) {
 	//fmt.Printf("At the beginning of scanFromFile. myFileId = %d\n", myFileId)
 	buf := bufPool.Get().(*bytes.Buffer)
 	var n int
@@ -67,7 +69,9 @@ func scanFromFile(itemsPerBatch int, classname string, myFileId int) (int64, int
 	}
 	
 	close(inputDone[myFileId])
-	return itemsRead, bytesRead
+	//return itemsRead, bytesRead
+	itemsReadChan[myFileId] <- itemsRead
+	bytesReadChan[myFileId] <- bytesRead
 }
 
 func readFromChan(myFileId int) {
@@ -107,17 +111,36 @@ func main() {
 	}
 
 	fmt.Println("start scanFromChan")
+
+	//var itemsRead []int64
+	//var bytesRead []int64
+	itemsReadChan = make([]chan int64, fileNum)
+	bytesReadChan = make([]chan int64, fileNum)
+
+	for i := 0; i < fileNum; i++ {
+		itemsReadChan[i] = make(chan int64)
+		bytesReadChan[i] = make(chan int64)
+	}
+
 	for i := 0; i < fileNum; i++ {
 		fileId := i
 		go func() {
-			_, _ = scanFromFile(1, "h2o_feet", fileId)
+			scanFromFile(1, "h2o_feet", fileId)
 		}()
 	}
+
 
 	fmt.Println("wait for close(inputDone)")
 	for i := 0; i < fileNum; i++ {
 		<-inputDone[i]
 	}
+
+	for i := 0; i < fileNum; i++ {
+		fmt.Printf("itemsRead[%d] = %d, bytesRead[%d] = %d\n", i, <-itemsReadChan[i], i, <-bytesReadChan[i])
+		close(itemsReadChan[i])
+		close(bytesReadChan[i])
+	}
+
 	fmt.Println("finish to close(inputDone)")
 	for i := 0; i < fileNum; i++ {
 		close(batchChan[i])
